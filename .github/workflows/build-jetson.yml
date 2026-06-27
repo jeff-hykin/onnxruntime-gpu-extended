@@ -1,0 +1,60 @@
+name: build-jetson-wheel
+
+# Build onnxruntime CUDA wheels for NVIDIA Jetson on a NATIVE aarch64 runner
+# (ubuntu-24.04-arm) — no qemu, so it's far faster than emulating on x86_64.
+# Uses the same docker/Dockerfile.jetson recipe as the local build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: "Python version (e.g. 3.12)"
+        default: "3.12"
+      jetpack:
+        description: "JetPack target: jp6 (CUDA 12.6, Orin sm_87) or jp5 (CUDA 11.4)"
+        default: "jp6"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # JP6 = L4T r36.4.0, CUDA 12.6, Orin sm_87, onnxruntime 1.26.0.
+          - jetpack: jp6
+            l4t_tag: r36.4.0
+            ort_version: v1.26.0
+            cuda_arch: "87"
+            python_version: ${{ github.event.inputs.python_version || '3.12' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # onnxruntime + CUDA build tree is large; reclaim space on the runner.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+
+      - name: Build wheel (native aarch64, no emulation)
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f docker/Dockerfile.jetson \
+            --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
+            --build-arg ORT_VERSION=${{ matrix.ort_version }} \
+            --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
+            --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
+            --build-arg BUILD_JOBS=$(nproc) \
+            --target wheel \
+            --output type=local,dest=./wheels \
+            .
+          ls -lh ./wheels
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-${{ matrix.jetpack }}-cp${{ matrix.python_version }}
+          path: ./wheels/*.whl
+          if-no-files-found: error

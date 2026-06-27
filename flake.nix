@@ -1,100 +1,140 @@
 {
-  description = "Build onnxruntime-gpu (CUDA) wheels for platforms upstream doesn't ship — primarily NVIDIA Jetson (aarch64 + CUDA), cross-compiled from x86_64.";
+  description = "Build onnxruntime CUDA wheels for platforms upstream onnxruntime-gpu doesn't ship — primarily NVIDIA Jetson (aarch64 + CUDA / L4T).";
 
   # ===========================================================================
-  # STRATEGY (staged)
+  # HOW THIS WORKS (read TARGETS.md for the full matrix + reasoning)
   #
-  # Upstream `onnxruntime-gpu` on PyPI ships CUDA wheels for linux x86_64 +
-  # windows only. The gap we fill: NVIDIA Jetson (aarch64 + CUDA / L4T). That
-  # build is the whole point of this repo.
+  # We build ON TOP OF nixpkgs' own `onnxruntime` derivation (currently 1.26.0).
+  # That derivation already:
+  #   - pre-vendors every CMake FetchContent dep (abseil, protobuf, onnx, ...),
+  #   - builds the python wheel itself (`setup.py bdist_wheel` in postBuild),
+  #     leaving the `.whl` in its `dist` output.
+  # So a "wheel" target here is just `<onnxruntime>.dist`, with the right python
+  # and the right CUDA package set selected.
   #
-  # Stage 1 (here, WIP): build an onnxruntime-gpu wheel WITH the CUDA execution
-  #   provider natively on an x86_64-linux + NVIDIA host. This proves the nix
-  #   build of onnxruntime+CUDA works and produces a redistributable wheel.
-  #   NOTE: cannot be built on macOS (nixpkgs CUDA is linux-only). Build on a
-  #   real x86_64 CUDA box.
+  # x86_64 (Stage 1, VALIDATION only — upstream already ships x86_64 wheels):
+  #   built natively here; runtime-verifiable on a local GPU.
   #
-  # Stage 2 (TODO): cross-compile the same wheel for Jetson (aarch64 + CUDA)
-  #   from an x86_64 host. Plan: use jetpack-nixos (anduril) which provides the
-  #   L4T BSP — CUDA, cuDNN, TensorRT for aarch64 Jetson — and is designed for
-  #   x86_64 -> aarch64 cross builds. onnxruntime's CUDA EP compiles device code
-  #   to cubin/PTX for the target SM (Orin sm_87, Xavier sm_72, Nano sm_53)
-  #   without needing a GPU present at build time, so cross-compiling is viable.
+  # Jetson aarch64 (the actual deliverable):
+  #   CANNOT be cross-compiled from x86_64 — jetpack-nixos disables CUDA in cross
+  #   builds ("not supported upstream") and nixpkgs CUDA does not cross. These
+  #   targets therefore live under packages.aarch64-linux.* and must be built on
+  #   a NATIVE aarch64 Linux host (a reachable Orin, or a GitHub ubuntu-24.04-arm
+  #   runner — no GPU needed to COMPILE). jetpack-nixos provides the L4T CUDA via
+  #   its overlay; we pick the JetPack CUDA set with cudaPackages_<ver>.pkgs.
   #
-  # Key known hard problem: onnxruntime's build pulls many deps via CMake
-  # FetchContent at configure time (abseil, protobuf, flatbuffers, onnx, eigen,
-  # re2, ...). In the nix sandbox (no network) those must be pre-vendored.
-  # nixpkgs' own `onnxruntime` derivation already solves this, so Stage 1 builds
-  # ON TOP of nixpkgs' onnxruntime rather than from raw source.
+  # NOTE on portability: a nix-built wheel has /nix/store rpaths and is NOT yet a
+  # stock-Jetson-portable wheel. Repathing/bundling for JetPack-provided CUDA is a
+  # Stage-3 (publish) concern, tracked separately.
   # ===========================================================================
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    # L4T / JetPack (CUDA, cuDNN, TensorRT) for Jetson + x86_64->aarch64 cross.
-    # Used in Stage 2.
+    # L4T / JetPack (CUDA, cuDNN, TensorRT) for Jetson. Provides nvidia-jetpack5/6/7
+    # and the matching cudaPackages_<ver> sets via its overlay.
     jetpack-nixos.url = "github:anduril/jetpack-nixos";
   };
 
   outputs = { self, nixpkgs, flake-utils, jetpack-nixos, ... }:
     let
-      # onnxruntime release to track/build. The -extended version will follow
-      # upstream onnxruntime-gpu (single source of truth, à la gtsam_extended's
-      # run/upstream_version.py — to be added once the build itself works).
-      onnxruntimeVersion = "1.20.1"; # TODO: confirm/pin desired upstream release
+      # Python versions we attempt wheels for. 3.14 is best-effort (very new;
+      # onnxruntime may not build against it yet). Keyed by cpXY tag.
+      pythonVersions = [ "310" "311" "312" "313" "314" ];
 
-      # CUDA requires unfree + the cudaSupport config flag.
-      pkgsFor = system: import nixpkgs {
-        inherit system;
-        config = {
-          allowUnfree = true;
-          cudaSupport = true;
-        };
+      # Pick a python interpreter attr (pythonXYZ) from a pkgs instance, skipping
+      # versions that instance doesn't provide.
+      pyAttr = ver: "python${ver}";
+      hasPy = pkgs: ver: pkgs ? ${pyAttr ver};
+
+      # Base nixpkgs config for any CUDA build. caps = list of cudaCapabilities
+      # (SM targets), e.g. [ "8.7" ] for Orin.
+      cudaConfig = caps: {
+        allowUnfree = true;
+        cudaSupport = true;
+        cudaCapabilities = caps;
       };
-    in
-    # Stage 1 only targets x86_64-linux. (aarch64 Jetson handled in Stage 2.)
-    flake-utils.lib.eachSystem [ "x86_64-linux" ] (system:
-      let
-        pkgs = pkgsFor system;
-        python = pkgs.python311;
-        cuda = pkgs.cudaPackages;
-      in {
-        # ---------------------------------------------------------------------
-        # Stage 1 draft: x86_64-linux + CUDA onnxruntime, wheel extraction TODO.
-        #
-        # UNTESTED — authored on a Mac that cannot evaluate CUDA derivations.
-        # First real iteration must happen on an x86_64 CUDA host:
-        #   nix build .#onnxruntime-gpu-wheel
-        # ---------------------------------------------------------------------
-        packages.onnxruntime-gpu-wheel =
-          (python.pkgs.onnxruntime.override {
-            cudaSupport = true;
-          }).overrideAttrs (old: {
-            # TODO(on-machine): onnxruntime's python build leaves a setup.py in
-            # the cmake build tree. Add a postBuild/installPhase that runs
-            # `python setup.py bdist_wheel` there and copies the .whl into $out,
-            # mirroring gtsam_extended's flake (setup.py bdist_wheel -> repack).
-            # Then decide CUDA-lib bundling: Jetson provides CUDA via JetPack, so
-            # the wheel likely should NOT bundle libcudart/cudnn/etc.
-          });
 
-        # Toolchain for driving/iterating the build by hand on a CUDA host.
-        devShells.default = pkgs.mkShell {
+      # Build the wheel (`dist` output) for a given configured pkgs instance and
+      # python version. `ortPkgs` is the package set whose `onnxruntime` carries
+      # the desired CUDA set (e.g. pkgs.cudaPackages_12_6.pkgs for JetPack 6).
+      mkWheel = ortPkgs: ver:
+        let
+          py = ortPkgs.${pyAttr ver};
+          ort = ortPkgs.onnxruntime.override {
+            python3Packages = ortPkgs.${"python${ver}Packages"};
+          };
+        in
+        # The wheel lives in the `dist` output of the onnxruntime build.
+        ort.dist;
+
+      # Turn a (configured pkgs instance, target tag) into an attrset of
+      # { "<tag>-cp<ver>" = wheel; } for every python version that instance has.
+      wheelsFor = ortPkgs: tag:
+        builtins.listToAttrs (builtins.concatMap
+          (ver:
+            if hasPy ortPkgs ver
+            then [{ name = "${tag}-cp${ver}"; value = mkWheel ortPkgs ver; }]
+            else [ ])
+          pythonVersions);
+    in
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" ] (system:
+      let
+        # x86_64 validation: build for sm_90 + PTX. nixpkgs CUDA (<12.8) has no
+        # sm_120 SASS for Blackwell (RTX 50xx); compute_90 PTX JITs forward onto
+        # it. Single arch keeps the build fast.
+        pkgsX86 = import nixpkgs {
+          inherit system;
+          config = cudaConfig [ "9.0" ];
+        };
+
+        # aarch64 Jetson: nixpkgs + jetpack-nixos overlay. We select the JetPack
+        # CUDA set per target via cudaPackages_<ver>.pkgs (a nixpkgs instance whose
+        # default cudaPackages is that set, so `onnxruntime` links the right CUDA).
+        pkgsJetson = caps: import nixpkgs {
+          inherit system;
+          config = cudaConfig caps;
+          overlays = [ jetpack-nixos.overlays.default ];
+        };
+
+        # Orin = sm_87, Xavier = sm_72, Thor = cc 11.0.
+        jp6 = pkgsJetson [ "8.7" ];          # JetPack 6, CUDA 12.6
+        jp5 = pkgsJetson [ "7.2" "8.7" ];    # JetPack 5, CUDA 11.4 (Orin+Xavier)
+        jp7 = pkgsJetson [ "11.0" ];         # JetPack 7, CUDA 13.0 (Thor)
+
+        x86Wheels = wheelsFor pkgsX86 "x86";
+        jetsonWheels =
+          (wheelsFor jp6.cudaPackages_12_6.pkgs "jp6")
+          // (wheelsFor jp5.cudaPackages_11.pkgs "jp5")
+          // (wheelsFor jp7.cudaPackages_13_0.pkgs "jp7");
+
+        packages =
+          if system == "aarch64-linux"
+          then jetsonWheels
+          else x86Wheels // { default = x86Wheels."x86-cp312" or null; };
+
+        devPkgs = pkgsX86;
+      in
+      {
+        inherit packages;
+
+        devShells.default = devPkgs.mkShell {
           packages = [
-            pkgs.cmake
-            pkgs.ninja
-            python
-            python.pkgs.numpy
-            python.pkgs.setuptools
-            python.pkgs.wheel
-            python.pkgs.packaging
-            cuda.cuda_nvcc
-            cuda.cudatoolkit
-            cuda.cudnn
+            devPkgs.cmake
+            devPkgs.ninja
+            devPkgs.python312
+            devPkgs.python312Packages.numpy
+            devPkgs.python312Packages.setuptools
+            devPkgs.python312Packages.wheel
+            devPkgs.python312Packages.packaging
           ];
           shellHook = ''
-            echo "onnxruntime-gpu-extended dev shell (onnxruntime ${onnxruntimeVersion}, CUDA)"
-            echo "  Stage 1: nix build .#onnxruntime-gpu-wheel  (x86_64 + CUDA host only)"
+            echo "onnxruntime-gpu-extended dev shell"
+            echo "  x86_64 wheels (validation):  nix build .#x86-cp312"
+            echo "  Jetson wheels (native aarch64 builder only):"
+            echo "    nix build .#jp6-cp312   # Orin sm_87, CUDA 12.6"
+            echo "    nix build .#jp5-cp312   # Orin+Xavier, CUDA 11.4 (needs older ort)"
+            echo "    nix build .#jp7-cp312   # Thor, CUDA 13.0"
           '';
         };
       });

@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+# Build an onnxruntime CUDA wheel for NVIDIA Jetson (aarch64 / L4T).
+#
+# This is the proven path for producing Jetson onnxruntime-gpu wheels on an x86_64
+# host: build inside an aarch64 container on NVIDIA's L4T base image (CUDA + cuDNN
+# + TensorRT already present at JetPack paths). Run it on a native aarch64 host for
+# speed, or on x86_64 via qemu binfmt emulation (slow but works):
+#   docker run --privileged --rm tonistiigi/binfmt --install arm64
+#
+# Args let one Dockerfile cover the whole matrix (see TARGETS.md):
+#   L4T_TAG     base image tag        JP6 -> r36.4.0 (CUDA 12.6), JP5 -> r35.x
+#   ORT_VERSION onnxruntime git tag   JP6 -> v1.26.0 ; JP5(CUDA11) needs older
+#   PYTHON_VERSION  e.g. 3.12
+#   CUDA_ARCH   SM without dot         Orin 87, Xavier 72
+ARG L4T_TAG=r36.4.0
+FROM nvcr.io/nvidia/l4t-jetpack:${L4T_TAG} AS build
+
+ARG ORT_VERSION=v1.26.0
+ARG PYTHON_VERSION=3.12
+ARG CUDA_ARCH=87
+# Compile parallelism. Keep modest under qemu emulation: each emulated nvcc/cicc
+# can use 1-2GB, so high -j risks OOM. Raise on a native aarch64 host.
+ARG BUILD_JOBS=8
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Python (deadsnakes gives non-system versions for arm64) + build toolchain.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common ca-certificates gnupg git wget \
+        build-essential ninja-build && \
+    add-apt-repository -y ppa:deadsnakes/ppa && apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
+        python${PYTHON_VERSION}-venv && \
+    rm -rf /var/lib/apt/lists/*
+
+# Isolated venv for the target python; recent cmake/build deps via pip (Ubuntu
+# 22.04 apt cmake is too old for onnxruntime 1.26).
+RUN python${PYTHON_VERSION} -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir -U pip wheel setuptools && \
+    /opt/venv/bin/pip install --no-cache-dir "cmake>=3.28" numpy packaging
+ENV PATH=/opt/venv/bin:$PATH
+
+# onnxruntime source (FetchContent deps resolve over the network at build time —
+# fine in Docker, unlike the Nix sandbox).
+RUN git clone --recursive --depth 1 --branch ${ORT_VERSION} \
+        https://github.com/microsoft/onnxruntime /opt/onnxruntime
+
+WORKDIR /opt/onnxruntime
+# CUDA + cuDNN ship in the L4T base at standard paths. Build the python wheel for
+# the requested SM only (keeps emulated builds tractable).
+RUN ./build.sh \
+        --config Release \
+        --update --build --parallel ${BUILD_JOBS} \
+        --use_cuda \
+        --cuda_home /usr/local/cuda \
+        --cudnn_home /usr \
+        --build_wheel \
+        --skip_tests \
+        --allow_running_as_root \
+        --cmake_extra_defines \
+            CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
+            onnxruntime_BUILD_UNIT_TESTS=OFF
+
+# Collect the wheel at a predictable path.
+RUN mkdir -p /wheels && cp build/Linux/Release/dist/*.whl /wheels/
+
+# Export-only stage: lets `docker buildx build --target wheel \
+#   --output type=local,dest=./wheels` drop just the .whl on the host.
+FROM scratch AS wheel
+COPY --from=build /wheels/ /
