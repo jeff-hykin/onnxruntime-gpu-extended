@@ -1,0 +1,48 @@
+name: build-jetson-nix
+
+# Build the Jetson onnxruntime CUDA wheel via NIX on a NATIVE aarch64 runner.
+#
+# Why nix instead of the hand-rolled docker recipe: onnxruntime's bundled abseil
+# (lts_2025xx) does not compile under nvcc, and matching a compatible abseil/gcc/
+# CUDA toolchain by hand is whack-a-mole. nixpkgs already solved this (it
+# substitutes a compatible abseil and pins the toolchain), so we build on top of
+# nixpkgs' onnxruntime via the flake. Native aarch64 runner => no qemu, fast.
+#
+# Produces onnxruntime 1.22.2 (the nixos-25.11 pin that jetpack-nixos targets).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "flake target (jp6-cp312 / jp6-cp311 / jp5-cp312 / jp7-cp312 ...)"
+        default: "jp6-cp312"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: false
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Build wheel (nix, native aarch64)
+        run: |
+          target="${{ github.event.inputs.target || 'jp6-cp312' }}"
+          nix build -L --print-out-paths \
+            ".#packages.aarch64-linux.${target}" -o result
+          echo "=== dist output ==="; ls -lL result/
+          mkdir -p wheels && cp -L result/*.whl wheels/
+          ls -lh wheels
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-nix-${{ github.event.inputs.target || 'jp6-cp312' }}
+          path: wheels/*.whl
+          if-no-files-found: error
