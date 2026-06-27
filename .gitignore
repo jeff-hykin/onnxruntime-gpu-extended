@@ -1,0 +1,8 @@
+result
+result-*
+wheels_input/
+renamed_wheels/
+__pycache__/
+*.pyc
+.direnv/
+.DS_Store
