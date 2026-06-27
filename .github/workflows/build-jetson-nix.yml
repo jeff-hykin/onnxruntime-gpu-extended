@@ -27,18 +27,39 @@ jobs:
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
-          large-packages: false
+          large-packages: true
+          docker-images: true
+
+      # GH arm runners are 4-core/16GB. The onnxruntime CUDA build (esp. the
+      # providers_cuda link) spikes past 16GB and OOM-kills the runner. Add swap
+      # to survive the spikes.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 16G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          echo "=== mem ==="; free -h
+          echo "=== disk ==="; df -h /
 
       - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Build wheel (nix, native aarch64)
         run: |
           target="${{ github.event.inputs.target || 'jp6-cp312' }}"
+          # Cap parallelism: one derivation at a time, limited compile threads, to
+          # keep peak RAM bounded (swap covers the final single-threaded link).
           nix build -L --print-out-paths \
+            --cores 3 --max-jobs 1 \
             ".#packages.aarch64-linux.${target}" -o result
           echo "=== dist output ==="; ls -lL result/
           mkdir -p wheels && cp -L result/*.whl wheels/
           ls -lh wheels
+
+      - name: Diagnostics (mem/disk after build)
+        if: always()
+        run: |
+          echo "=== mem ==="; free -h
+          echo "=== disk ==="; df -h /
+          echo "=== swap ==="; swapon --show || true
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
