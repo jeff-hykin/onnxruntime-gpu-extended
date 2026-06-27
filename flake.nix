@@ -31,12 +31,18 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # jetpack-nixos's CUDA overlay (cudaPackages_<ver> manifest overrides) is written
+    # against the nixpkgs release it pins (nixos-25.11). Feeding it a different nixpkgs
+    # (e.g. unstable) breaks with "manifest version missing", so the Jetson packages are
+    # built from a matching nixos-25.11 that jetpack-nixos `follows`.
+    nixpkgs-jetpack.url = "github:NixOS/nixpkgs/nixos-25.11";
     # L4T / JetPack (CUDA, cuDNN, TensorRT) for Jetson. Provides nvidia-jetpack5/6/7
     # and the matching cudaPackages_<ver> sets via its overlay.
     jetpack-nixos.url = "github:anduril/jetpack-nixos";
+    jetpack-nixos.inputs.nixpkgs.follows = "nixpkgs-jetpack";
   };
 
-  outputs = { self, nixpkgs, flake-utils, jetpack-nixos, ... }:
+  outputs = { self, nixpkgs, nixpkgs-jetpack, flake-utils, jetpack-nixos, ... }:
     let
       # Python versions we attempt wheels for. 3.14 is best-effort (very new;
       # onnxruntime may not build against it yet). Keyed by cpXY tag.
@@ -88,10 +94,10 @@
           config = cudaConfig [ "9.0" ];
         };
 
-        # aarch64 Jetson: nixpkgs + jetpack-nixos overlay. We select the JetPack
-        # CUDA set per target via cudaPackages_<ver>.pkgs (a nixpkgs instance whose
-        # default cudaPackages is that set, so `onnxruntime` links the right CUDA).
-        pkgsJetson = caps: import nixpkgs {
+        # aarch64 Jetson: nixos-25.11 (matching jetpack-nixos) + its overlay. We select
+        # the JetPack CUDA set per target via cudaPackages_<ver>.pkgs (a nixpkgs instance
+        # whose default cudaPackages is that set, so `onnxruntime` links the right CUDA).
+        pkgsJetson = caps: import nixpkgs-jetpack {
           inherit system;
           config = cudaConfig caps;
           overlays = [ jetpack-nixos.overlays.default ];
