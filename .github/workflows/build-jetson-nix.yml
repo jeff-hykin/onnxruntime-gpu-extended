@@ -47,12 +47,15 @@ jobs:
           target="${{ github.event.inputs.target || 'jp6-cp312' }}"
           # Cap parallelism: one derivation at a time, limited compile threads, to
           # keep peak RAM bounded (swap covers the final single-threaded link).
-          nix build -L --print-out-paths \
+          # Capture the (dist) output path directly — don't rely on a result symlink.
+          out=$(nix build -L --no-link --print-out-paths \
             --cores 3 --max-jobs 1 \
-            ".#packages.aarch64-linux.${target}" -o result
-          echo "=== dist output ==="; ls -lL result/
-          mkdir -p wheels && cp -L result/*.whl wheels/
-          ls -lh wheels
+            ".#packages.aarch64-linux.${target}")
+          echo "=== dist output: $out ==="; ls -lR "$out" | head -40
+          whl=$(find -L "$out" -name '*.whl' | head -1)
+          test -n "$whl" || { echo "ERROR: no .whl in $out"; exit 1; }
+          mkdir -p wheels && cp -L "$whl" wheels/
+          echo "=== extracted wheel ==="; ls -lh wheels
 
       - name: Diagnostics (mem/disk after build)
         if: always()
