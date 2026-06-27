@@ -25,13 +25,19 @@ ARG BUILD_JOBS=8
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Python (deadsnakes gives non-system versions for arm64) + build toolchain.
+# gcc-12: the L4T base ships gcc-11, but onnxruntime 1.26's bundled abseil
+# (lts_2025xx) fails to compile under nvcc+gcc-11 ("template argument invalid"
+# in raw_hash_map.h). gcc-12 (supported by CUDA 12.6) compiles it. Made the
+# default via update-alternatives so cmake C/CXX *and* nvcc's host compiler use it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         software-properties-common ca-certificates gnupg git wget \
-        build-essential ninja-build && \
+        build-essential ninja-build gcc-12 g++-12 && \
     add-apt-repository -y ppa:deadsnakes/ppa && apt-get update && \
     apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
         python${PYTHON_VERSION}-venv && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
+    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
     rm -rf /var/lib/apt/lists/*
 
 # Isolated venv for the target python; recent cmake/build deps via pip (Ubuntu
@@ -45,6 +51,14 @@ ENV PATH=/opt/venv/bin:$PATH
 # fine in Docker, unlike the Nix sandbox).
 RUN git clone --recursive --depth 1 --branch ${ORT_VERSION} \
         https://github.com/microsoft/onnxruntime /opt/onnxruntime
+
+# Pre-fetch cutlass (largest FetchContent dep): its zip download over HTTP/2 from
+# github intermittently fails ("Stream error in the HTTP/2 framing layer"). Clone
+# it via git and point FetchContent at the local copy (FETCHCONTENT_SOURCE_DIR_*),
+# the same approach nixpkgs uses. Tag must match onnxruntime's cmake/deps.txt.
+ARG CUTLASS_TAG=v4.4.2
+RUN git clone --depth 1 --branch ${CUTLASS_TAG} \
+        https://github.com/NVIDIA/cutlass /opt/cutlass
 
 WORKDIR /opt/onnxruntime
 # CUDA + cuDNN ship in the L4T base at standard paths. Build the python wheel for
@@ -60,7 +74,8 @@ RUN ./build.sh \
         --allow_running_as_root \
         --cmake_extra_defines \
             CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
-            onnxruntime_BUILD_UNIT_TESTS=OFF
+            onnxruntime_BUILD_UNIT_TESTS=OFF \
+            FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass
 
 # Collect the wheel at a predictable path.
 RUN mkdir -p /wheels && cp build/Linux/Release/dist/*.whl /wheels/
