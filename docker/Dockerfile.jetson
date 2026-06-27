@@ -66,6 +66,7 @@ WORKDIR /opt/onnxruntime
 RUN ./build.sh \
         --config Release \
         --update --build --parallel ${BUILD_JOBS} \
+        --compile_no_warning_as_error \
         --use_cuda \
         --cuda_home /usr/local/cuda \
         --cudnn_home /usr \
