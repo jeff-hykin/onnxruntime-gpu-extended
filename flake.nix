@@ -61,14 +61,34 @@
         cudaCapabilities = caps;
       };
 
+      # Python package set for a wheel build. For cp310 we pin numpy 2.2.6: nixos-25.11
+      # ships numpy 2.3.x which dropped Python 3.10 (so python310Packages.numpy throws
+      # "not supported for interpreter"), and 2.2.6 is the last series supporting 3.10.
+      # Everything else uses the stock set.
+      pyPackagesFor = ortPkgs: ver:
+        let base = ortPkgs.${"python${ver}Packages"};
+        in if ver != "310" then base
+        else base.overrideScope (pyself: pysuper: {
+          numpy = pysuper.numpy.overridePythonAttrs (old: {
+            version = "2.2.6";
+            src = pysuper.fetchPypi {
+              pname = "numpy";
+              version = "2.2.6";
+              hash = "sha256-4pVU4r71SpCqXMB9ps6VWsy4PyGrXeAaYshHiJeyZP0=";
+            };
+            # The version-specific guard and 2.3.x patches don't apply to 2.2.6.
+            disabled = false;
+            patches = [ ];
+          });
+        });
+
       # Build the wheel (`dist` output) for a given configured pkgs instance and
       # python version. `ortPkgs` is the package set whose `onnxruntime` carries
       # the desired CUDA set (e.g. pkgs.cudaPackages_12_6.pkgs for JetPack 6).
       mkWheel = ortPkgs: ver:
         let
-          py = ortPkgs.${pyAttr ver};
           ort = ortPkgs.onnxruntime.override {
-            python3Packages = ortPkgs.${"python${ver}Packages"};
+            python3Packages = pyPackagesFor ortPkgs ver;
           };
         in
         # The wheel lives in the `dist` output of the onnxruntime build.
@@ -94,25 +114,45 @@
           config = cudaConfig [ "9.0" ];
         };
 
-        # aarch64 Jetson: nixos-25.11 (matching jetpack-nixos) + its overlay. We select
-        # the JetPack CUDA set per target via cudaPackages_<ver>.pkgs (a nixpkgs instance
-        # whose default cudaPackages is that set, so `onnxruntime` links the right CUDA).
+        # aarch64 Jetson: nixpkgs + jetpack-nixos overlay. We select the JetPack CUDA
+        # set per target via cudaPackages_<ver>.pkgs (a nixpkgs instance whose default
+        # cudaPackages is that set, so `onnxruntime` links the right CUDA).
+        #
         pkgsJetson = caps: import nixpkgs-jetpack {
           inherit system;
           config = cudaConfig caps;
           overlays = [ jetpack-nixos.overlays.default ];
         };
 
-        # Orin = sm_87, Xavier = sm_72, Thor = cc 11.0.
-        jp6 = pkgsJetson [ "8.7" ];          # JetPack 6, CUDA 12.6
-        jp5 = pkgsJetson [ "7.2" "8.7" ];    # JetPack 5, CUDA 11.4 (Orin+Xavier)
-        jp7 = pkgsJetson [ "11.0" ];         # JetPack 7, CUDA 13.0 (Thor)
+        # JetPack target -> CUDA package-set attr + SM caps. Orin=sm_87, Xavier=sm_72, Thor=cc11.0.
+        jetsonTargets = {
+          jp6 = { cudaAttr = "cudaPackages_12_6"; caps = [ "8.7" ]; };       # CUDA 12.6
+          jp5 = { cudaAttr = "cudaPackages_11"; caps = [ "7.2" "8.7" ]; };   # CUDA 11.4
+          jp7 = { cudaAttr = "cudaPackages_13_0"; caps = [ "11.0" ]; };      # CUDA 13.0
+        };
+
+        # The onnxruntime package set for a JetPack target: take that JetPack's
+        # cudaPackages.pkgs. Returns null if that CUDA set isn't present on this
+        # nixpkgs (e.g. no CUDA 13 set for jp7), so the combo is skipped instead of
+        # breaking the whole attrset eval. (`ver` is unused here — the per-python
+        # numpy pin lives in mkWheel/pyPackagesFor.)
+        ortPkgsFor = jpTag: ver:
+          let
+            t = jetsonTargets.${jpTag};
+            base = pkgsJetson t.caps;
+          in
+          if base ? ${t.cudaAttr} then base.${t.cudaAttr}.pkgs else null;
 
         x86Wheels = wheelsFor pkgsX86 "x86";
-        jetsonWheels =
-          (wheelsFor jp6.cudaPackages_12_6.pkgs "jp6")
-          // (wheelsFor jp5.cudaPackages_11.pkgs "jp5")
-          // (wheelsFor jp7.cudaPackages_13_0.pkgs "jp7");
+        jetsonWheels = builtins.listToAttrs (builtins.concatMap
+          (jpTag: builtins.concatMap
+            (ver:
+              let ortPkgs = ortPkgsFor jpTag ver;
+              in if ortPkgs != null && hasPy ortPkgs ver
+                 then [{ name = "${jpTag}-cp${ver}"; value = mkWheel ortPkgs ver; }]
+                 else [ ])
+            pythonVersions)
+          (builtins.attrNames jetsonTargets));
 
         packages =
           if system == "aarch64-linux"
