@@ -27,6 +27,21 @@ NEW_DIST_NAME = "onnxruntime_gpu_extended"
 KNOWN_DIST_NAMES = {"onnxruntime", "onnxruntime_gpu"}
 
 
+def platform_retag():
+    """Optional platform-tag rewrite (old=new) from the PLATFORM_RETAG env var.
+
+    PyPI rejects bare `linux_*` platform tags, so Nix-built Jetson/aarch64 CUDA
+    wheels (tagged `linux_aarch64`) must be re-tagged to a manylinux tag before
+    upload, e.g. PLATFORM_RETAG="linux_aarch64=manylinux2014_aarch64". Returns
+    (old, new) or (None, None) when unset.
+    """
+    spec = os.environ.get("PLATFORM_RETAG", "")
+    if "=" not in spec:
+        return None, None
+    old, new = spec.split("=", 1)
+    return old.strip(), new.strip()
+
+
 def get_target_version():
     """Resolve the onnxruntime-gpu-extended version all wheels normalize to.
 
@@ -99,6 +114,10 @@ def rename_wheel(wheel_path, output_dir, target_version):
     if old_dist_name not in KNOWN_DIST_NAMES and old_dist_name != NEW_DIST_NAME:
         print(f"WARNING: Unknown distribution name '{old_dist_name}' in {wheel_path.name}, renaming anyway")
 
+    plat_old, plat_new = platform_retag()
+    if plat_old and plat_old in tags:
+        tags = tags.replace(plat_old, plat_new)
+
     new_wheel_name = f"{NEW_DIST_NAME}-{target_version}-{tags}.whl"
 
     # Unpack
@@ -154,6 +173,14 @@ def rename_wheel(wheel_path, output_dir, target_version):
             flags=re.MULTILINE,
         )
         metadata_path.write_text(metadata)
+
+    # Rewrite the platform tag inside WHEEL so it matches the retagged filename.
+    if plat_old:
+        wheel_meta_path = new_info_path / "WHEEL"
+        if wheel_meta_path.exists():
+            wheel_meta = wheel_meta_path.read_text()
+            wheel_meta = wheel_meta.replace(plat_old, plat_new)
+            wheel_meta_path.write_text(wheel_meta)
 
     # Rebuild RECORD
     record_path = new_info_path / "RECORD"
