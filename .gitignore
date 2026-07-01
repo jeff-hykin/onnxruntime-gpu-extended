@@ -2,6 +2,9 @@ result
 result-*
 wheels_input/
 renamed_wheels/
+dist/
+build/
+*.egg-info/
 __pycache__/
 *.pyc
 .direnv/

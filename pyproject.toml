@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "onnxruntime-gpu-extended"
+version = "0.0.1"
+description = "ONNX Runtime GPU (CUDA) - pre-built wheels for platforms upstream onnxruntime-gpu doesn't ship (e.g. NVIDIA Jetson / aarch64 + CUDA)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+    "numpy",
+]
+authors = [
+    {name = "Community Contributor"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+keywords = ["onnxruntime", "onnx", "cuda", "gpu", "jetson", "aarch64", "inference"]
+
+[project.urls]
+Homepage = "https://onnxruntime.ai/"
+Repository = "https://github.com/jeff-hykin/onnxruntime-gpu-extended"
+
+[tool.setuptools]
+packages = ["onnxruntime_gpu_extended"]

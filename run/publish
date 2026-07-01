@@ -1,0 +1,76 @@
+#!/usr/bin/env -S deno run --allow-all --no-lock
+import fs from "node:fs"
+import * as dax from "https://esm.sh/@jsr/david__dax@0.43.2/mod.ts"
+import * as path from "https://esm.sh/jsr/@std/path@1.1.2"
+import { env, aliases, $stdout, $stderr, initHelpers, iterateOver } from "https://esm.sh/gh/jeff-hykin/bash2deno@0.1.0.2/helpers.js"
+let { $, appendTo, overwrite, hasCommand, makeScope, settings, exitCodeOfLastChildProcess } = initHelpers({ dax })
+import { FileSystem, glob } from "https://deno.land/x/quickr@0.8.6/main/file_system.js"
+
+// Change to repo root
+await $`cd ${FileSystem.thisFolder}/..`
+
+// Resolve the version once (from upstream PyPI unless pinned) so the download,
+// rename, and tag steps all agree on a single value. CI also pins UPSTREAM_VERSION
+// so download_wheels.py grabs the exact release this version was derived from.
+const targetVersion = Deno.env.get("TARGET_VERSION") || (await $`python3 run/upstream_version.py --target`.text()).trim()
+Deno.env.set("TARGET_VERSION", targetVersion)
+console.log(`=== Publishing onnxruntime-gpu-extended ${targetVersion} ===`)
+
+// Step 1: Download wheels from PyPI + collect local builds
+console.log("=== Step 1: Download and collect wheels ===")
+await $`python3 download_wheels.py`
+
+// Step 2: Rename all wheels to onnxruntime_gpu_extended
+console.log("\n=== Step 2: Rename wheels ===")
+await $`rm -rf ./renamed_wheels`
+await $`python3 rename_wheel.py`
+
+// Check if renamed wheels exist
+if (!fs.existsSync(`./renamed_wheels`) || !fs.lstatSync(`./renamed_wheels`).isDirectory()) {
+    console.error("ERROR: renamed_wheels directory not found. Did rename_wheel.py fail?")
+    Deno.exit(1)
+}
+
+const wheels = await glob(`renamed_wheels/*.whl`)
+if (wheels.length === 0) {
+    console.error("ERROR: No wheels found in renamed_wheels/")
+    Deno.exit(1)
+}
+
+console.log(`\nFound ${wheels.length} wheel(s) to upload`)
+
+// Step 3: Validate wheels before upload
+console.log("\n=== Step 3: Validate ===")
+var { code: checkCode } = await $`python3 -m twine check ${wheels}`
+if (checkCode !== 0) {
+    console.error("ERROR: Wheel validation failed")
+    Deno.exit(1)
+}
+
+// PUBLISH_SKIP_UPLOAD=1 stops here (build + rename only) — handy for dry runs / CI.
+if (Deno.env.get("PUBLISH_SKIP_UPLOAD") === "1") {
+    console.log("\nPUBLISH_SKIP_UPLOAD=1 set — stopping before upload.")
+    console.log("Wheels ready in renamed_wheels/:")
+    console.log(wheels.join("\n"))
+    Deno.exit(0)
+}
+
+// Step 4: Upload all wheels to PyPI
+await $`stty sane 2>/dev/null`
+console.log("\n=== Step 4: Upload to PyPI ===")
+// --skip-existing makes reruns idempotent (e.g. when only a few new wheels appear).
+var { code } = await $`python3 -m twine upload --non-interactive --skip-existing ${wheels}`
+
+if (code !== 0) {
+    console.error("ERROR: Upload failed")
+    Deno.exit(1)
+}
+
+console.log("Successfully uploaded all wheels!")
+
+// Tag the version we just published.
+console.log(`Tagging version: ${targetVersion}`)
+await $`git tag v${targetVersion} 2>/dev/null || echo "Tag already exists"`
+await $`git push origin v${targetVersion} 2>/dev/null || echo "Tag already pushed"`
+
+console.log("Done!")
