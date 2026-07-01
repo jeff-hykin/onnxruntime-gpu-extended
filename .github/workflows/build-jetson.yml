@@ -21,10 +21,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # JP6 = L4T r36.4.0, CUDA 12.6, Orin sm_87, onnxruntime 1.26.0.
+          # JP6 = L4T r36.4.0, CUDA 12.6, Orin sm_87, onnxruntime 1.22.2
+          # (abseil 20240722.0 + cutlass v3.5.1 — the nvcc-safe combo).
           - jetpack: jp6
             l4t_tag: r36.4.0
-            ort_version: v1.26.0
+            ort_version: v1.22.2
+            cutlass_tag: v3.5.1
             cuda_arch: "87"
             python_version: ${{ github.event.inputs.python_version || '3.12' }}
     steps:
@@ -37,6 +39,15 @@ jobs:
           tool-cache: true
           large-packages: false
 
+      # GH arm runners are 4-core/16GB. The onnxruntime CUDA build (esp. the
+      # providers_cuda link) spikes past 16GB and OOM-kills the build. Add swap
+      # to survive the spikes.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 16G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+          echo "=== mem ==="; free -h
+
       - name: Build wheel (native aarch64, no emulation)
         run: |
           docker buildx build \
@@ -44,6 +55,7 @@ jobs:
             -f docker/Dockerfile.jetson \
             --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
             --build-arg ORT_VERSION=${{ matrix.ort_version }} \
+            --build-arg CUTLASS_TAG=${{ matrix.cutlass_tag }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
             --build-arg BUILD_JOBS=$(nproc) \

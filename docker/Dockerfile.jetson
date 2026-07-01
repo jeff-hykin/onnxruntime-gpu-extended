@@ -9,13 +9,20 @@
 #
 # Args let one Dockerfile cover the whole matrix (see TARGETS.md):
 #   L4T_TAG     base image tag        JP6 -> r36.4.0 (CUDA 12.6), JP5 -> r35.x
-#   ORT_VERSION onnxruntime git tag   JP6 -> v1.26.0 ; JP5(CUDA11) needs older
+#   ORT_VERSION onnxruntime git tag   JP6 -> v1.22.2 ; JP5(CUDA11) needs older
 #   PYTHON_VERSION  e.g. 3.12
 #   CUDA_ARCH   SM without dot         Orin 87, Xavier 72
+#
+# onnxruntime version choice: v1.22.2 pins abseil 20240722.0, which nvcc's C++
+# frontend compiles cleanly. NEWER onnxruntime (>=1.24) pins abseil lts_2025xx,
+# whose raw_hash_map.h uses `typename ...::template AddPtr<>` in a form nvcc's
+# frontend rejects ("template argument invalid") when compiling the .cu files —
+# a host-gcc swap does NOT fix it (it's nvcc's own frontend, not the host
+# compiler). So we track 1.22.2 (also the version nixpkgs builds for aarch64).
 ARG L4T_TAG=r36.4.0
 FROM nvcr.io/nvidia/l4t-jetpack:${L4T_TAG} AS build
 
-ARG ORT_VERSION=v1.26.0
+ARG ORT_VERSION=v1.22.2
 ARG PYTHON_VERSION=3.12
 ARG CUDA_ARCH=87
 # Compile parallelism. Keep modest under qemu emulation: each emulated nvcc/cicc
@@ -25,10 +32,9 @@ ARG BUILD_JOBS=8
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Python (deadsnakes gives non-system versions for arm64) + build toolchain.
-# gcc-12: the L4T base ships gcc-11, but onnxruntime 1.26's bundled abseil
-# (lts_2025xx) fails to compile under nvcc+gcc-11 ("template argument invalid"
-# in raw_hash_map.h). gcc-12 (supported by CUDA 12.6) compiles it. Made the
-# default via update-alternatives so cmake C/CXX *and* nvcc's host compiler use it.
+# gcc-12: the L4T base ships gcc-11; gcc-12 (supported by CUDA 12.6) is a safe,
+# well-tested host compiler for the onnxruntime CUDA build. Made the default via
+# update-alternatives so cmake C/CXX *and* nvcc's host compiler use it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         software-properties-common ca-certificates gnupg git wget \
         build-essential ninja-build gcc-12 g++-12 && \
@@ -55,8 +61,9 @@ RUN git clone --recursive --depth 1 --branch ${ORT_VERSION} \
 # Pre-fetch cutlass (largest FetchContent dep): its zip download over HTTP/2 from
 # github intermittently fails ("Stream error in the HTTP/2 framing layer"). Clone
 # it via git and point FetchContent at the local copy (FETCHCONTENT_SOURCE_DIR_*),
-# the same approach nixpkgs uses. Tag must match onnxruntime's cmake/deps.txt.
-ARG CUTLASS_TAG=v4.4.2
+# the same approach nixpkgs uses. Tag must match onnxruntime's cmake/deps.txt
+# (onnxruntime 1.22.2 -> cutlass v3.5.1).
+ARG CUTLASS_TAG=v3.5.1
 RUN git clone --depth 1 --branch ${CUTLASS_TAG} \
         https://github.com/NVIDIA/cutlass /opt/cutlass
 
