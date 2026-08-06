@@ -1,8 +1,11 @@
 result
 result-*
 wheels_input/
+wheels_ci/
+_ci_stage/
 renamed_wheels/
 dist/
+dist_ci/
 build/
 *.egg-info/
 __pycache__/

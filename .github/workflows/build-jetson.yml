@@ -13,6 +13,9 @@ on:
       jetpack:
         description: "JetPack target: jp6 (CUDA 12.6, Orin sm_87) or jp5 (CUDA 11.4)"
         default: "jp6"
+      build_jobs:
+        description: "Compile parallelism"
+        default: "1"
 
 jobs:
   build:
@@ -41,7 +44,9 @@ jobs:
 
       # GH arm runners are 4-core/16GB. The onnxruntime CUDA build (esp. the
       # providers_cuda link) spikes past 16GB and OOM-kills the build. Add swap
-      # to survive the spikes.
+      # to survive the spikes. Swap alone isn't enough at -j4: the thrash during
+      # the nvcc-heavy phase (~90-95%) starves the runner agent and GitHub kills
+      # the job with a bare "The operation was canceled" — hence serial compile.
       - name: Add swap
         run: |
           sudo fallocate -l 16G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=16384
@@ -58,7 +63,7 @@ jobs:
             --build-arg CUTLASS_TAG=${{ matrix.cutlass_tag }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
-            --build-arg BUILD_JOBS=$(nproc) \
+            --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
             --target wheel \
             --output type=local,dest=./wheels \
             .
