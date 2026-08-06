@@ -70,7 +70,15 @@ RUN git clone --depth 1 --branch ${CUTLASS_TAG} \
 WORKDIR /opt/onnxruntime
 # CUDA + cuDNN ship in the L4T base at standard paths. Build the python wheel for
 # the requested SM only (keeps emulated builds tractable).
-RUN ./build.sh \
+#
+# Python_NumPy_INCLUDE_DIR is pinned to the venv's numpy on purpose. The L4T base
+# is Ubuntu 22.04, whose *system* python is 3.10 and ships an apt numpy 1.x. When
+# PYTHON_VERSION=3.10 those system headers win over the venv's numpy 2.x, and the
+# resulting wheel imports only under numpy<2 ("_ARRAY_API not found" otherwise).
+# Other Python versions come from deadsnakes and never see the system numpy, so
+# this only ever bit 3.10 — pin it for all of them so it can't come back.
+RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
+    ./build.sh \
         --config Release \
         --update --build --parallel ${BUILD_JOBS} \
         --compile_no_warning_as_error \
@@ -83,10 +91,23 @@ RUN ./build.sh \
         --cmake_extra_defines \
             CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
             onnxruntime_BUILD_UNIT_TESTS=OFF \
-            FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass
+            FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass \
+            Python_NumPy_INCLUDE_DIR=${NUMPY_INCLUDE}
 
 # Collect the wheel at a predictable path.
 RUN mkdir -p /wheels && cp build/Linux/Release/dist/*.whl /wheels/
+
+# Smoke-test the wheel in a clean venv, against whatever numpy pip resolves for
+# this Python. Catches ABI breakage here rather than after a 4-hour CI run.
+# `import onnxruntime` needs no GPU — the CUDA provider is only dlopened when a
+# session is created.
+RUN python${PYTHON_VERSION} -m venv /opt/smoketest && \
+    /opt/smoketest/bin/pip install --no-cache-dir -q /wheels/*.whl && \
+    /opt/smoketest/bin/python -c "\
+import numpy, onnxruntime; \
+print('smoke test: numpy', numpy.__version__, '/ onnxruntime', onnxruntime.__version__); \
+print('providers:', onnxruntime.get_available_providers()); \
+assert 'CUDAExecutionProvider' in onnxruntime.get_available_providers()"
 
 # Export-only stage: lets `docker buildx build --target wheel \
 #   --output type=local,dest=./wheels` drop just the .whl on the host.
