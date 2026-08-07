@@ -69,9 +69,28 @@ jobs:
             .
           ls -lh ./wheels
 
+      # Upload before smoke-testing: the compile takes ~4h, so a wheel that builds
+      # but fails its test must still be recoverable from the artifact.
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
           name: onnxruntime-${{ matrix.jetpack }}-cp${{ matrix.python_version }}
           path: ./wheels/*.whl
           if-no-files-found: error
+
+      # Reuses the cached build stage from the step above, so this is quick.
+      - name: Smoke-test the wheel
+        run: |
+          docker buildx build \
+            --platform linux/arm64 \
+            -f docker/Dockerfile.jetson \
+            --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
+            --build-arg ORT_VERSION=${{ matrix.ort_version }} \
+            --build-arg CUTLASS_TAG=${{ matrix.cutlass_tag }} \
+            --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
+            --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
+            --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
+            --target smoketest \
+            --output type=cacheonly \
+            --progress plain \
+            .
