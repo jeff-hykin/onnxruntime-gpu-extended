@@ -44,7 +44,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python${PYTHON_VERSION}-venv && \
     update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
     update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/include/python*/numpy
 
 # Isolated venv for the target python; recent cmake/build deps via pip (Ubuntu
 # 22.04 apt cmake is too old for onnxruntime 1.26).
@@ -72,11 +73,12 @@ WORKDIR /opt/onnxruntime
 # the requested SM only (keeps emulated builds tractable).
 #
 # Python_NumPy_INCLUDE_DIR is pinned to the venv's numpy on purpose. The L4T base
-# is Ubuntu 22.04, whose *system* python is 3.10 and ships an apt numpy 1.x. When
-# PYTHON_VERSION=3.10 those system headers win over the venv's numpy 2.x, and the
-# resulting wheel imports only under numpy<2 ("_ARRAY_API not found" otherwise).
-# Other Python versions come from deadsnakes and never see the system numpy, so
-# this only ever bit 3.10 — pin it for all of them so it can't come back.
+# is Ubuntu 22.04, whose apt python3-numpy is 1.x and installs its headers into
+# /usr/include/python3.10/numpy — i.e. inside Python_INCLUDE_DIRS, so at
+# PYTHON_VERSION=3.10 `#include <numpy/arrayobject.h>` resolved to numpy 1 no
+# matter what this pin said, and the wheel then imported only under numpy<2
+# ("_ARRAY_API not found"). Deleting that directory above is what actually fixes
+# it; 3.11+ come from deadsnakes and never had the shadowing dir.
 RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
     ./build.sh \
         --config Release \
