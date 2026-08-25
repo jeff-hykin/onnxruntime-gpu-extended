@@ -10,9 +10,9 @@ on:
       python_version:
         description: "Python version (e.g. 3.12)"
         default: "3.12"
-      jetpack:
-        description: "JetPack target: jp6 (CUDA 12.6, Orin sm_87) or jp5 (CUDA 11.4)"
-        default: "jp6"
+      l4t_tag:
+        description: "L4T base tag. r36.4.0 = JetPack 6.1/6.2 (CUDA 12.6, cuDNN 9); r36.3.0 = JetPack 6.0 (CUDA 12.2, cuDNN 8)"
+        default: "r36.4.0"
       build_jobs:
         description: "Compile parallelism"
         default: "1"
@@ -24,10 +24,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # JP6 = L4T r36.4.0, CUDA 12.6, Orin sm_87, onnxruntime 1.22.2
+          # L4T r36.x (JetPack 6) on Orin sm_87, onnxruntime 1.22.2
           # (abseil 20240722.0 + cutlass v3.5.1 — the nvcc-safe combo).
-          - jetpack: jp6
-            l4t_tag: r36.4.0
+          # A wheel links whatever cuDNN major its base image ships, so it only
+          # runs on that JetPack: r36.4.0 -> libcudnn.so.9 (JP6.1/6.2),
+          # r36.3.0 -> libcudnn.so.8 (JP6.0). ORT 1.22.2 builds against either;
+          # on cuDNN 8 it just compiles without the NHWC ops.
+          - l4t_tag: ${{ github.event.inputs.l4t_tag || 'r36.4.0' }}
             ort_version: v1.22.2
             cutlass_tag: v3.5.1
             cuda_arch: "87"
@@ -74,7 +77,7 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: onnxruntime-${{ matrix.jetpack }}-cp${{ matrix.python_version }}
+          name: onnxruntime-${{ matrix.l4t_tag }}-cp${{ matrix.python_version }}
           path: ./wheels/*.whl
           if-no-files-found: error
 
