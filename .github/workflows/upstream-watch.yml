@@ -28,7 +28,11 @@ jobs:
         id: check
         run: |
           upstream=$(python3 run/upstream_version.py)
-          built=$(grep -m1 'ort_version:' .github/workflows/build-jetson.yml | sed 's/.*ort_version: *v//')
+          # The version we build is the matrix fallback for the ort_version input.
+          built=$(sed -n "s/.*inputs\.ort_version || 'v\([^']*\)'.*/\1/p" \
+                    .github/workflows/build-jetson.yml | head -1)
+          # Without this, a parse break would file a nonsense issue every night.
+          test -n "$built" || { echo "could not read the built version"; exit 1; }
           echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
           echo "built=$built" >> "$GITHUB_OUTPUT"
           echo "upstream=$upstream  built=$built"

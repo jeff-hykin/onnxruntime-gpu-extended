@@ -14,11 +14,9 @@
 #   CUDA_ARCH   SM without dot         Orin 87, Xavier 72
 #
 # onnxruntime version choice: v1.22.2 pins abseil 20240722.0, which nvcc's C++
-# frontend compiles cleanly. NEWER onnxruntime (>=1.24) pins abseil lts_2025xx,
-# whose raw_hash_map.h uses `typename ...::template AddPtr<>` in a form nvcc's
-# frontend rejects ("template argument invalid") when compiling the .cu files —
-# a host-gcc swap does NOT fix it (it's nvcc's own frontend, not the host
-# compiler). So we track 1.22.2 (also the version nixpkgs builds for aarch64).
+# frontend compiles cleanly. Newer onnxruntime (>=1.23) pins abseil lts_2025xx,
+# which nvcc used to choke on; docker/patch_abseil.py now fixes that at the
+# source, so newer ORT_VERSIONs are buildable (see the abseil stage below).
 ARG L4T_TAG=r36.4.0
 FROM nvcr.io/nvidia/l4t-jetpack:${L4T_TAG} AS build
 
@@ -62,11 +60,18 @@ RUN git clone --recursive --depth 1 --branch ${ORT_VERSION} \
 # Pre-fetch cutlass (largest FetchContent dep): its zip download over HTTP/2 from
 # github intermittently fails ("Stream error in the HTTP/2 framing layer"). Clone
 # it via git and point FetchContent at the local copy (FETCHCONTENT_SOURCE_DIR_*),
-# the same approach nixpkgs uses. Tag must match onnxruntime's cmake/deps.txt
-# (onnxruntime 1.22.2 -> cutlass v3.5.1).
-ARG CUTLASS_TAG=v3.5.1
-RUN git clone --depth 1 --branch ${CUTLASS_TAG} \
+# the same approach nixpkgs uses. The tag is read out of onnxruntime's own
+# cmake/deps.txt so it tracks ORT_VERSION instead of drifting (1.22.2 wants
+# v3.5.1, 1.23.2 wants v3.9.2). CUTLASS_TAG overrides it if ever needed.
+ARG CUTLASS_TAG=
+RUN set -eux; \
+    tag=${CUTLASS_TAG:-$(sed -n 's#^cutlass;.*/tags/\(.*\)\.zip;.*#\1#p' \
+            /opt/onnxruntime/cmake/deps.txt)}; \
+    test -n "$tag"; \
+    git clone --depth 1 --branch "$tag" \
         https://github.com/NVIDIA/cutlass /opt/cutlass
+
+COPY docker/patch_abseil.py /opt/patch_abseil.py
 
 WORKDIR /opt/onnxruntime
 # CUDA + cuDNN ship in the L4T base at standard paths. Build the python wheel for
@@ -79,10 +84,19 @@ WORKDIR /opt/onnxruntime
 # matter what this pin said, and the wheel then imported only under numpy<2
 # ("_ARRAY_API not found"). Deleting that directory above is what actually fixes
 # it; 3.11+ come from deadsnakes and never had the shadowing dir.
+#
+# Configure and compile are split so abseil can be patched in between. abseil
+# lts_2025xx (onnxruntime >=1.23) writes `IfRRef<X>::AddPtr<Y>`; nvcc re-emits
+# that for the host compiler with a `typename` prefix and no `template` keyword,
+# which is ill-formed, so gcc rejects it — reproduced on gcc 11 through 16, so a
+# host-compiler swap does not help. Patching after --update (rather than
+# overriding FETCHCONTENT_SOURCE_DIR_ABSEIL_CPP) keeps onnxruntime's own abseil
+# patches, which a source-dir override would silently skip. No-ops on the older
+# abseil that 1.22.x pins.
 RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
     ./build.sh \
         --config Release \
-        --update --build --parallel ${BUILD_JOBS} \
+        --update --parallel ${BUILD_JOBS} \
         --compile_no_warning_as_error \
         --use_cuda \
         --cuda_home /usr/local/cuda \
@@ -95,6 +109,19 @@ RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
             onnxruntime_BUILD_UNIT_TESTS=OFF \
             FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass \
             Python_NumPy_INCLUDE_DIR=${NUMPY_INCLUDE}
+
+RUN python /opt/patch_abseil.py build/Linux/Release/_deps/abseil_cpp-src
+
+RUN ./build.sh \
+        --config Release \
+        --build --parallel ${BUILD_JOBS} \
+        --compile_no_warning_as_error \
+        --use_cuda \
+        --cuda_home /usr/local/cuda \
+        --cudnn_home /usr \
+        --build_wheel \
+        --skip_tests \
+        --allow_running_as_root
 
 # Collect the wheel at a predictable path.
 RUN mkdir -p /wheels && cp build/Linux/Release/dist/*.whl /wheels/

@@ -13,6 +13,9 @@ on:
       l4t_tag:
         description: "L4T base tag. r36.4.0 = JetPack 6.1/6.2 (CUDA 12.6, cuDNN 9); r36.3.0 = JetPack 6.0 (CUDA 12.2, cuDNN 8)"
         default: "r36.4.0"
+      ort_version:
+        description: "onnxruntime git tag. cutlass/abseil follow it via cmake/deps.txt"
+        default: "v1.22.2"
       build_jobs:
         description: "Compile parallelism"
         default: "1"
@@ -24,15 +27,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # L4T r36.x (JetPack 6) on Orin sm_87, onnxruntime 1.22.2
-          # (abseil 20240722.0 + cutlass v3.5.1 — the nvcc-safe combo).
+          # L4T r36.x (JetPack 6) on Orin sm_87.
           # A wheel links whatever cuDNN major its base image ships, so it only
           # runs on that JetPack: r36.4.0 -> libcudnn.so.9 (JP6.1/6.2),
           # r36.3.0 -> libcudnn.so.8 (JP6.0). ORT 1.22.2 builds against either;
           # on cuDNN 8 it just compiles without the NHWC ops.
           - l4t_tag: ${{ github.event.inputs.l4t_tag || 'r36.4.0' }}
-            ort_version: v1.22.2
-            cutlass_tag: v3.5.1
+            ort_version: ${{ github.event.inputs.ort_version || 'v1.22.2' }}
             cuda_arch: "87"
             python_version: ${{ github.event.inputs.python_version || '3.12' }}
     steps:
@@ -63,7 +64,6 @@ jobs:
             -f docker/Dockerfile.jetson \
             --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
             --build-arg ORT_VERSION=${{ matrix.ort_version }} \
-            --build-arg CUTLASS_TAG=${{ matrix.cutlass_tag }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
@@ -89,7 +89,6 @@ jobs:
             -f docker/Dockerfile.jetson \
             --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
             --build-arg ORT_VERSION=${{ matrix.ort_version }} \
-            --build-arg CUTLASS_TAG=${{ matrix.cutlass_tag }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
