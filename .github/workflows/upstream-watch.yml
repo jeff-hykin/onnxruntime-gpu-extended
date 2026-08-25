@@ -1,0 +1,55 @@
+name: upstream-watch
+
+# Notice when a new onnxruntime is released upstream.
+#
+# This does NOT auto-build. Our Jetson wheels are pinned to onnxruntime 1.22.2
+# on purpose (newer releases pin abseil 20250814, whose raw_hash_map.h nvcc's
+# frontend rejects), so a build triggered straight off an upstream release would
+# just fail every night. Until that pin can move, the useful signal is a nudge.
+#
+# The issue list doubles as the state: one issue per upstream version, so a
+# version already filed never gets filed twice.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare upstream against the version we build
+        id: check
+        run: |
+          upstream=$(python3 run/upstream_version.py)
+          built=$(grep -m1 'ort_version:' .github/workflows/build-jetson.yml | sed 's/.*ort_version: *v//')
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "built=$built" >> "$GITHUB_OUTPUT"
+          echo "upstream=$upstream  built=$built"
+
+      - name: File a nudge if this version is new
+        if: steps.check.outputs.upstream != steps.check.outputs.built
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM: ${{ steps.check.outputs.upstream }}
+          BUILT: ${{ steps.check.outputs.built }}
+        run: |
+          title="upstream onnxruntime $UPSTREAM released (we build $BUILT)"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$title in:title" \
+               --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "already filed: $title"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body \
+          "onnxruntime \`$UPSTREAM\` is on PyPI. Jetson wheels are still built from \`v$BUILT\`.
+
+          To move the pin, \`ort_version\` in \`.github/workflows/build-jetson.yml\` has to build
+          against abseil 20250814 — see the nvcc note in \`docker/Dockerfile.jetson\`.
+
+          Upstream x86_64 wheels need no compile and could be republished at \`$UPSTREAM\` today."
