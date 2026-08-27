@@ -23,15 +23,20 @@ wheels rather than rebuild them).
 | JetPack | L4T   | CUDA (native)     | Boards (SM)                       | onnxruntime that fits |
 |---------|-------|-------------------|-----------------------------------|-----------------------|
 | 6.x     | r36   | 12.6 (12.4–12.9)  | Orin AGX/NX/Nano (**sm_87**)      | **1.26.0** (nixpkgs) ✓ |
-| 5.x     | r35   | 11.4 (→12.2 compat)| Orin (sm_87) + Xavier (**sm_72**) | needs older ort (~1.19/1.20, CUDA 11) ✗ |
+| 5.x     | r35   | 11.4 (→12.2 compat)| Orin (sm_87) + Xavier (**sm_72**) | **1.18.1** (CUDA 11) ✓ |
 | 7.x     | r38?  | 13.0              | Thor AGX (**sm_110 / cc 11.0**)   | 1.26.0 (if CUDA13 builds) |
 
 Notes:
 - **JP6 is the clean target**: CUDA 12.6 pairs with the onnxruntime 1.26.0 that
   nixpkgs already vendors (all FetchContent deps + a `dist` wheel output).
-- **JP5 is extra work**: onnxruntime 1.26 requires CUDA 12; JP5 is CUDA 11.4. A JP5
-  wheel needs an older onnxruntime branch (last CUDA-11 release, ~1.19/1.20) whose
-  vendored deps differ — not reusable from nixpkgs' 1.26 derivation.
+- **JP5 needs onnxruntime 1.18.1.** 1.18.1 is the last release published to PyPI with
+  CUDA 11, and its cmake sets 11.4 as the hard floor (`FATAL_ERROR` below that) —
+  exactly what JP5 ships. Flash and memory-efficient attention switch themselves off
+  under 11.6, so those kernels are absent from a JP5 wheel.
+  Three things differ from the JP6 recipe, all now build args: the base is Ubuntu
+  20.04 so deadsnakes has no packages (use `PYTHON_SOURCE=uv`), CUDA 11.4 rejects
+  gcc-12 (`GCC_VERSION=`), and 1.18 sets `cmake_policy(CMP0104 OLD)` which cmake 4
+  removed (`CMAKE_SPEC='cmake>=3.28,<4'`). 3.12 is the highest python 1.18 supports.
 - JP5 *can* run CUDA 12.2 via `cuda_compat`, but nixpkgs/jetpack pins JP5 to CUDA 11.4
   natively; relying on cuda_compat for a 12.x build is unproven here.
 

@@ -8,8 +8,9 @@
 #   docker run --privileged --rm tonistiigi/binfmt --install arm64
 #
 # Args let one Dockerfile cover the whole matrix (see TARGETS.md):
-#   L4T_TAG     base image tag        JP6 -> r36.4.0 (CUDA 12.6), JP5 -> r35.x
-#   ORT_VERSION onnxruntime git tag   JP6 -> v1.22.2 ; JP5(CUDA11) needs older
+#   L4T_TAG     base image tag        JP6 -> r36.4.0 (CUDA 12.6), JP5 -> r35.1.0 (CUDA 11.4)
+#   ORT_VERSION onnxruntime git tag   JP6 -> v1.22.2 ; JP5 -> v1.18.1, the last
+#                                     release whose cmake accepts CUDA 11.4
 #   PYTHON_VERSION  e.g. 3.12
 #   CUDA_ARCH   SM without dot         Orin 87, Xavier 72
 #
@@ -26,30 +27,49 @@ ARG CUDA_ARCH=87
 # Compile parallelism. Keep modest under qemu emulation: each emulated nvcc/cicc
 # can use 1-2GB, so high -j risks OOM. Raise on a native aarch64 host.
 ARG BUILD_JOBS=8
+# gcc-12 pairs with CUDA 12.6 on the JP6 base. CUDA 11.4 (JP5) does not accept it
+# and Ubuntu 20.04 does not package it, so pass an empty value there to keep the
+# base image's own compiler.
+ARG GCC_VERSION=12
+# deadsnakes stopped publishing for Ubuntu 20.04, which is what the JP5 base is
+# built on. `uv` supplies portable CPython builds for every version instead.
+ARG PYTHON_SOURCE=deadsnakes
+# onnxruntime 1.18 calls cmake_policy(SET CMP0104 OLD), and cmake 4 deleted that
+# policy, so a CUDA 11 build has to stay on cmake 3.
+ARG CMAKE_SPEC=cmake>=3.28
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Python (deadsnakes gives non-system versions for arm64) + build toolchain.
-# gcc-12: the L4T base ships gcc-11; gcc-12 (supported by CUDA 12.6) is a safe,
-# well-tested host compiler for the onnxruntime CUDA build. Made the default via
-# update-alternatives so cmake C/CXX *and* nvcc's host compiler use it.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        software-properties-common ca-certificates gnupg git wget \
-        build-essential ninja-build gcc-12 g++-12 && \
-    add-apt-repository -y ppa:deadsnakes/ppa && apt-get update && \
+RUN set -eux; \
+    apt-get update; \
     apt-get install -y --no-install-recommends \
-        python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
-        python${PYTHON_VERSION}-venv && \
-    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 100 && \
-    update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-12 100 && \
-    rm -rf /var/lib/apt/lists/* && \
+        software-properties-common ca-certificates gnupg git wget curl \
+        build-essential ninja-build; \
+    if [ -n "${GCC_VERSION}" ]; then \
+        apt-get install -y --no-install-recommends \
+            gcc-${GCC_VERSION} g++-${GCC_VERSION}; \
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 100; \
+        update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-${GCC_VERSION} 100; \
+    fi; \
+    if [ "${PYTHON_SOURCE}" = deadsnakes ]; then \
+        add-apt-repository -y ppa:deadsnakes/ppa; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends \
+            python${PYTHON_VERSION} python${PYTHON_VERSION}-dev \
+            python${PYTHON_VERSION}-venv; \
+    else \
+        curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh; \
+        uv python install ${PYTHON_VERSION}; \
+        ln -s "$(uv python find ${PYTHON_VERSION})" /usr/local/bin/python${PYTHON_VERSION}; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*; \
     rm -rf /usr/include/python*/numpy
 
 # Isolated venv for the target python; recent cmake/build deps via pip (Ubuntu
 # 22.04 apt cmake is too old for onnxruntime 1.26).
 RUN python${PYTHON_VERSION} -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -U pip wheel setuptools && \
-    /opt/venv/bin/pip install --no-cache-dir "cmake>=3.28" numpy packaging
+    /opt/venv/bin/pip install --no-cache-dir "${CMAKE_SPEC}" numpy packaging
 ENV PATH=/opt/venv/bin:$PATH
 
 # onnxruntime source (FetchContent deps resolve over the network at build time —

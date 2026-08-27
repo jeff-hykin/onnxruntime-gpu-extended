@@ -11,7 +11,7 @@ on:
         description: "Python version (e.g. 3.12)"
         default: "3.12"
       l4t_tag:
-        description: "L4T base tag. r36.4.0 = JetPack 6.1/6.2 (CUDA 12.6, cuDNN 9); r36.3.0 = JetPack 6.0 (CUDA 12.2, cuDNN 8)"
+        description: "L4T base tag. r36.4.0 = JetPack 6.1/6.2 (CUDA 12.6, cuDNN 9); r36.3.0 = JetPack 6.0 (CUDA 12.2, cuDNN 8); r35.1.0 = JetPack 5 (CUDA 11.4, cuDNN 8)"
         default: "r36.4.0"
       ort_version:
         description: "onnxruntime git tag. cutlass/abseil follow it via cmake/deps.txt"
@@ -19,6 +19,15 @@ on:
       build_jobs:
         description: "Compile parallelism"
         default: "1"
+      gcc_version:
+        description: "Host compiler to install. Empty keeps the base image's own (required on JP5)"
+        default: "12"
+      python_source:
+        description: "Where the interpreter comes from: deadsnakes (JP6) or uv (JP5, since deadsnakes dropped Ubuntu 20.04)"
+        default: "deadsnakes"
+      cmake_spec:
+        description: "pip requirement for cmake. onnxruntime 1.18 needs cmake<4"
+        default: "cmake>=3.28"
 
 jobs:
   build:
@@ -67,6 +76,9 @@ jobs:
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
+            --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
+            --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
+            --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
             --target wheel \
             --output type=local,dest=./wheels \
             .
@@ -92,6 +104,9 @@ jobs:
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
             --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
+            --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
+            --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
+            --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
             --target smoketest \
             --output type=cacheonly \
             --progress plain \
