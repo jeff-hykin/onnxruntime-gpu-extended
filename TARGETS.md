@@ -34,9 +34,11 @@ Notes:
   exactly what JP5 ships. Flash and memory-efficient attention switch themselves off
   under 11.6, so those kernels are absent from a JP5 wheel.
   Three things differ from the JP6 recipe, all now build args: the base is Ubuntu
-  20.04 so deadsnakes has no packages (use `PYTHON_SOURCE=uv`), CUDA 11.4 rejects
-  gcc-12 (`GCC_VERSION=`), and 1.18 sets `cmake_policy(CMP0104 OLD)` which cmake 4
-  removed (`CMAKE_SPEC='cmake>=3.28,<4'`). 3.12 is the highest python 1.18 supports.
+  20.04 so deadsnakes has no packages (use `PYTHON_SOURCE=uv`), the host compiler has
+  to be `GCC_VERSION=10` (CUDA 11.4 rejects gcc-12, but focal's default gcc-9 lacks
+  `-march=armv8.2-a+bf16` and onnxruntime hard-fails on aarch64 without it), and 1.18
+  sets `cmake_policy(CMP0104 OLD)` which cmake 4 removed
+  (`CMAKE_SPEC='cmake>=3.28,<4'`). 3.12 is the highest python 1.18 supports.
 - JP5 *can* run CUDA 12.2 via `cuda_compat`, but nixpkgs/jetpack pins JP5 to CUDA 11.4
   natively; relying on cuda_compat for a 12.x build is unproven here.
 

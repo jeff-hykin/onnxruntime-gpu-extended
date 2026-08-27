@@ -27,10 +27,12 @@ ARG CUDA_ARCH=87
 # Compile parallelism. Keep modest under qemu emulation: each emulated nvcc/cicc
 # can use 1-2GB, so high -j risks OOM. Raise on a native aarch64 host.
 ARG BUILD_JOBS=8
-# gcc-12 pairs with CUDA 12.6 on the JP6 base. CUDA 11.4 (JP5) does not accept it
-# and Ubuntu 20.04 does not package it, so pass "none" there to keep the base
-# image's own compiler. ("" means the same, but `gh workflow run -f x=` drops the
-# field entirely and the input default comes back.)
+# gcc-12 pairs with CUDA 12.6 on the JP6 base. The JP5 base wants 10: Ubuntu 20.04
+# has no gcc-12 and CUDA 11.4 would not accept it, but its default gcc-9 is also
+# too old — onnxruntime hard-fails on aarch64 unless the compiler takes
+# -march=armv8.2-a+bf16, which arrived in gcc-10.
+# "none" (or "") keeps whatever the base image ships. Prefer "none": `gh workflow
+# run -f x=` drops the field and the input default comes back instead.
 ARG GCC_VERSION=12
 # deadsnakes stopped publishing for Ubuntu 20.04, which is what the JP5 base is
 # built on. `uv` supplies portable CPython builds for every version instead.
