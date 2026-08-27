@@ -92,6 +92,19 @@ RUN set -eux; \
     git clone --depth 1 --branch "$tag" \
         https://github.com/NVIDIA/cutlass /opt/cutlass
 
+# Pre-fetch eigen for a different reason: onnxruntime <=1.20 fetches it from
+# gitlab, whose generated zip archives are not byte-stable, so the URL_HASH
+# recorded in deps.txt no longer matches what gitlab serves and cmake rejects the
+# download. onnxruntime hit the same wall and switched to the github mirror in
+# 1.22; take the commit out of deps.txt and get it from there.
+RUN set -eux; \
+    sha=$(sed -n 's#^eigen;.*/\([0-9a-f]\{40\}\)/.*#\1#p' /opt/onnxruntime/cmake/deps.txt); \
+    test -n "$sha"; \
+    wget -q -O /tmp/eigen.zip "https://github.com/eigen-mirror/eigen/archive/${sha}.zip"; \
+    python -c "import zipfile; zipfile.ZipFile('/tmp/eigen.zip').extractall('/opt')"; \
+    mv /opt/eigen-${sha} /opt/eigen; \
+    rm /tmp/eigen.zip
+
 COPY docker/patch_abseil.py /opt/patch_abseil.py
 
 WORKDIR /opt/onnxruntime
@@ -129,6 +142,7 @@ RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
             CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
             onnxruntime_BUILD_UNIT_TESTS=OFF \
             FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass \
+            FETCHCONTENT_SOURCE_DIR_EIGEN=/opt/eigen \
             Python_NumPy_INCLUDE_DIR=${NUMPY_INCLUDE}
 
 RUN python /opt/patch_abseil.py build/Linux/Release/_deps/abseil_cpp-src
