@@ -20,7 +20,7 @@ on:
         description: "Compile parallelism"
         default: "1"
       gcc_version:
-        description: "Host compiler to install. Empty keeps the base image's own (required on JP5)"
+        description: "Host compiler to install. \"none\" keeps the base image's own (required on JP5)"
         default: "12"
       python_source:
         description: "Where the interpreter comes from: deadsnakes (JP6) or uv (JP5, since deadsnakes dropped Ubuntu 20.04)"

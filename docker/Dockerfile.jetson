@@ -28,8 +28,9 @@ ARG CUDA_ARCH=87
 # can use 1-2GB, so high -j risks OOM. Raise on a native aarch64 host.
 ARG BUILD_JOBS=8
 # gcc-12 pairs with CUDA 12.6 on the JP6 base. CUDA 11.4 (JP5) does not accept it
-# and Ubuntu 20.04 does not package it, so pass an empty value there to keep the
-# base image's own compiler.
+# and Ubuntu 20.04 does not package it, so pass "none" there to keep the base
+# image's own compiler. ("" means the same, but `gh workflow run -f x=` drops the
+# field entirely and the input default comes back.)
 ARG GCC_VERSION=12
 # deadsnakes stopped publishing for Ubuntu 20.04, which is what the JP5 base is
 # built on. `uv` supplies portable CPython builds for every version instead.
@@ -45,7 +46,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends \
         software-properties-common ca-certificates gnupg git wget curl \
         build-essential ninja-build; \
-    if [ -n "${GCC_VERSION}" ]; then \
+    if [ -n "${GCC_VERSION}" ] && [ "${GCC_VERSION}" != none ]; then \
         apt-get install -y --no-install-recommends \
             gcc-${GCC_VERSION} g++-${GCC_VERSION}; \
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${GCC_VERSION} 100; \
