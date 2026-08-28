@@ -89,9 +89,16 @@ compute_90 PTX JITs forward onto the 5070's sm_120).
 `pip install onnxruntime-gpu-extended-auto` alone resolves to it and both a MatMul
 (cuBLAS) and a Conv (cuDNN) run on the GPU.
 
-One honest limit: **sm_72 / Xavier is not covered** — the build passes
-`cuda_arch=87`, so these wheels are Orin-only despite JP5 also running on Xavier.
-A follow-up batch built with `cuda_arch='72;87'` fixes that.
+**Xavier (sm_72) followed on 2026-08-28** as `1.18.1.11.8.post1`, built with
+`cuda_arch='72;87'` (109 MB, up from 86 MB). `1.18.1.11.8` stays Orin-only and stays
+published. Presence of the second architecture was checked by reading the SM number
+out of every cubin embedded in `libonnxruntime_providers_cuda.so`, using the
+sm_87-only wheel as a control: old `sm_87: 150` / no sm_72, new `sm_72: 150,
+sm_87: 150`.
+
+post1 is **not yet reachable through the dispatcher** — it is pending a regression
+test on real Orin hardware, and `onnxruntime-gpu-extended-auto` still pins
+`1.18.1.11.8` until that passes.
 
 Flash and memory-efficient attention **are present**, contrary to what the CUDA 11.6
 cutoff would suggest. `CUDA_UPGRADE=11-8` replaces the toolkit *before* cmake runs,
@@ -106,5 +113,7 @@ Orin (sm_87) and inert on Xavier (sm_72).
   pythons builds in ~2h20m at `build_jobs=1` (serial is required; -j4 thrashes swap
   hard enough that GitHub kills the job).
 - ~~JP5 onnxruntime version~~ — settled: 1.18.1.
-- Whether to add `sm_72` so the JP5 wheels also cover Xavier.
+- ~~Whether to add `sm_72` so the JP5 wheels also cover Xavier~~ — done, shipped as
+  `1.18.1.11.8.post1`. Still unverified on actual Xavier silicon; only the presence
+  of the cubins is proven.
 - Whether Thor / JP7 is an actual target.
