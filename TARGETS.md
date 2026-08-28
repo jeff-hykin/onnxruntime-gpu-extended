@@ -69,21 +69,37 @@ Deliverable = Jetson (aarch64) wheels. Each needs a native aarch64 builder.
 |---|--------|----------|--------|----------------|
 | 0 | 3.12   | x86_64   | sm_90* | **validation** on local RTX 5070 (PTX JIT). In progress. |
 | 1 | 3.12   | JP6      | sm_87  | first real deliverable |
-| 2 | 3.12   | JP5      | sm_87+sm_72 | needs older ort (CUDA 11) — blocked on ort version |
+| 2 | 3.12   | JP5      | sm_87  | **shipped** — see below |
 | 3 | 3.11   | JP6      | sm_87  | |
-| 4 | 3.11   | JP5      | sm_87+sm_72 | older ort |
+| 4 | 3.11   | JP5      | sm_87  | **shipped** |
 | 5 | 3.10   | JP6      | sm_87  | |
-| 6 | 3.10   | JP5      | sm_87+sm_72 | older ort |
+| 6 | 3.10   | JP5      | sm_87  | **shipped** |
 | 7 | 3.14   | JP6      | sm_87  | risky (3.14 + ort 1.26) |
-| 8 | 3.14   | JP5      | sm_87+sm_72 | risky + older ort |
+| 8 | 3.14   | JP5      | —      | impossible: ort 1.18 caps at python 3.12 |
 | + | 3.x    | JP7      | sm_110 | Thor — only if a Thor target is wanted |
 
 \* x86_64 validation builds for sm_90 + PTX (nixpkgs CUDA < 12.8 has no sm_120 SASS;
 compute_90 PTX JITs forward onto the 5070's sm_120).
 
+### JP5 is shipped (2026-08-28)
+
+`onnxruntime-gpu-extended==1.18.1.11.8`, cp38 through cp312, tagged
+`manylinux2014_aarch64`. Built on L4T r35.1.0 with the CUDA 11.8 upgrade; links
+`libcudnn.so.8` + `libcudart.so.11.0`. Verified on an Orin running JetPack 5.1.1:
+`pip install onnxruntime-gpu-extended-auto` alone resolves to it and both a MatMul
+(cuBLAS) and a Conv (cuDNN) run on the GPU.
+
+Two honest limits. **sm_72 / Xavier is not covered** — the build passes
+`cuda_arch=87`, so these wheels are Orin-only despite JP5 also running on Xavier;
+adding `72` to the arch list would fix it at the cost of build time and wheel size.
+And flash / memory-efficient attention are **absent**, because onnxruntime compiles
+them out below CUDA 11.6 and JP5's own toolkit is 11.4.
+
 ## Open decisions
 
-- **aarch64 builder**: reachable Orin over SSH, or GitHub `ubuntu-24.04-arm` runner?
-  (Determines how Stage 2 actually runs.)
-- JP5 onnxruntime version to track (CUDA-11 era) — only if JP5 wheels are required.
+- ~~**aarch64 builder**~~ — settled: GitHub `ubuntu-24.04-arm`. A JP5 matrix of five
+  pythons builds in ~2h20m at `build_jobs=1` (serial is required; -j4 thrashes swap
+  hard enough that GitHub kills the job).
+- ~~JP5 onnxruntime version~~ — settled: 1.18.1.
+- Whether to add `sm_72` so the JP5 wheels also cover Xavier.
 - Whether Thor / JP7 is an actual target.
