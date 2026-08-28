@@ -6,6 +6,12 @@
 # destroy the individually-verified wheel sets kept there.
 #
 # usage: stage_variant.sh <target_version> <scratch_dir> <wheel_source_dir>...
+#
+# The platform tag has to match what the *target device's pip* accepts, which is
+# not the same as what its glibc supports. JetPack 5 ships pip 20.0.2, released
+# before PEP 600, so it understands manylinux2014_aarch64 and nothing newer --
+# a manylinux_2_31 tag naming its own glibc exactly would still be rejected.
+# Override PLATFORM_TAG for those builds.
 set -euo pipefail
 
 target_version="$1"; shift
@@ -25,5 +31,5 @@ ls "$scratch/wheels_input"
 
 cd "$scratch"
 TARGET_VERSION="$target_version" \
-PLATFORM_RETAG="linux_aarch64=manylinux_2_34_aarch64" \
+PLATFORM_RETAG="linux_aarch64=${PLATFORM_TAG:-manylinux_2_34_aarch64}" \
     python3 "$repo/rename_wheel.py"
