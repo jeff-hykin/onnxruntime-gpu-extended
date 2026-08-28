@@ -89,11 +89,16 @@ compute_90 PTX JITs forward onto the 5070's sm_120).
 `pip install onnxruntime-gpu-extended-auto` alone resolves to it and both a MatMul
 (cuBLAS) and a Conv (cuDNN) run on the GPU.
 
-Two honest limits. **sm_72 / Xavier is not covered** — the build passes
-`cuda_arch=87`, so these wheels are Orin-only despite JP5 also running on Xavier;
-adding `72` to the arch list would fix it at the cost of build time and wheel size.
-And flash / memory-efficient attention are **absent**, because onnxruntime compiles
-them out below CUDA 11.6 and JP5's own toolkit is 11.4.
+One honest limit: **sm_72 / Xavier is not covered** — the build passes
+`cuda_arch=87`, so these wheels are Orin-only despite JP5 also running on Xavier.
+A follow-up batch built with `cuda_arch='72;87'` fixes that.
+
+Flash and memory-efficient attention **are present**, contrary to what the CUDA 11.6
+cutoff would suggest. `CUDA_UPGRADE=11-8` replaces the toolkit *before* cmake runs,
+so onnxruntime sees 11.8 and enables them; `strings` on the shipped
+`libonnxruntime_providers_cuda.so` finds ~11k `flash_fwd` instantiations. Note the
+kernels are still guarded by `__CUDA_ARCH__ >= 800` internally, so they are live on
+Orin (sm_87) and inert on Xavier (sm_72).
 
 ## Open decisions
 
