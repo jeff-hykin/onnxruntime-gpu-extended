@@ -37,6 +37,9 @@ on:
       cuda_home_dir:
         description: "CUDA root the build uses. Set to /usr/local/cuda-11.8 alongside cuda_upgrade=11-8"
         default: "/usr/local/cuda"
+      cuda_arch:
+        description: "SM targets, cmake semicolon list. 87 = Orin; \"72;87\" also covers Xavier (JP5 only — CUDA 12 dropped sm_72)"
+        default: "87"
 
 jobs:
   build:
@@ -52,7 +55,7 @@ jobs:
           # on cuDNN 8 it just compiles without the NHWC ops.
           - l4t_tag: ${{ github.event.inputs.l4t_tag || 'r36.4.0' }}
             ort_version: ${{ github.event.inputs.ort_version || 'v1.22.2' }}
-            cuda_arch: "87"
+            cuda_arch: ${{ github.event.inputs.cuda_arch || '87' }}
             python_version: ${{ github.event.inputs.python_version || '3.12' }}
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +86,7 @@ jobs:
             --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
             --build-arg ORT_VERSION=${{ matrix.ort_version }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
-            --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
+            --build-arg CUDA_ARCH='${{ matrix.cuda_arch }}' \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
             --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
@@ -114,7 +117,7 @@ jobs:
             --build-arg L4T_TAG=${{ matrix.l4t_tag }} \
             --build-arg ORT_VERSION=${{ matrix.ort_version }} \
             --build-arg PYTHON_VERSION=${{ matrix.python_version }} \
-            --build-arg CUDA_ARCH=${{ matrix.cuda_arch }} \
+            --build-arg CUDA_ARCH='${{ matrix.cuda_arch }}' \
             --build-arg BUILD_JOBS=${{ github.event.inputs.build_jobs || '1' }} \
             --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \

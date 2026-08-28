@@ -12,7 +12,10 @@
 #   ORT_VERSION onnxruntime git tag   JP6 -> v1.22.2 ; JP5 -> v1.18.1, the last
 #                                     release whose cmake accepts CUDA 11.4
 #   PYTHON_VERSION  e.g. 3.12
-#   CUDA_ARCH   SM without dot         Orin 87, Xavier 72
+#   CUDA_ARCH   SM without dot         Orin 87, Xavier 72. A cmake-style
+#                                     semicolon list like "72;87" builds both;
+#                                     it is quoted at the use site so the shell
+#                                     does not treat the ";" as a command break.
 #
 # onnxruntime version choice: v1.22.2 pins abseil 20240722.0, which nvcc's C++
 # frontend compiles cleanly. Newer onnxruntime (>=1.23) pins abseil lts_2025xx,
@@ -179,7 +182,7 @@ RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
         --skip_tests \
         --allow_running_as_root \
         --cmake_extra_defines \
-            CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH} \
+            "CMAKE_CUDA_ARCHITECTURES=${CUDA_ARCH}" \
             onnxruntime_BUILD_UNIT_TESTS=OFF \
             FETCHCONTENT_SOURCE_DIR_CUTLASS=/opt/cutlass \
             FETCHCONTENT_SOURCE_DIR_EIGEN=/opt/eigen \
