@@ -40,6 +40,13 @@ ARG PYTHON_SOURCE=deadsnakes
 # onnxruntime 1.18 calls cmake_policy(SET CMP0104 OLD), and cmake 4 deleted that
 # policy, so a CUDA 11 build has to stay on cmake 3.
 ARG CMAKE_SPEC=cmake>=3.28
+# Passed to build.sh --disable_types. CUDA 11.4 needs "float8": the FP8 enums
+# (CUDA_R_8F_E4M3/E5M2) only exist from CUDA 11.8, and cuda_common.cc names them
+# unless DISABLE_FLOAT8_TYPES is defined. Nothing is lost on Jetson — FP8 tensor
+# cores start at sm_89 and Orin is sm_87. Empty keeps FP8 for the CUDA 12 builds.
+# build.sh only version-checks this when --cuda_version is passed, which it is
+# not, so getting it wrong fails ~35 min into the compile rather than at configure.
+ARG DISABLE_TYPES=
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -134,6 +141,7 @@ RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
         --config Release \
         --update --parallel ${BUILD_JOBS} \
         --compile_no_warning_as_error \
+        ${DISABLE_TYPES:+--disable_types ${DISABLE_TYPES}} \
         --use_cuda \
         --cuda_home /usr/local/cuda \
         --cudnn_home /usr \
@@ -153,6 +161,7 @@ RUN ./build.sh \
         --config Release \
         --build --parallel ${BUILD_JOBS} \
         --compile_no_warning_as_error \
+        ${DISABLE_TYPES:+--disable_types ${DISABLE_TYPES}} \
         --use_cuda \
         --cuda_home /usr/local/cuda \
         --cudnn_home /usr \

@@ -28,6 +28,9 @@ on:
       cmake_spec:
         description: "pip requirement for cmake. onnxruntime 1.18 needs cmake<4"
         default: "cmake>=3.28"
+      disable_types:
+        description: "build.sh --disable_types value. Set to \"float8\" on JP5: the FP8 enums need CUDA>=11.8"
+        default: ""
 
 jobs:
   build:
@@ -79,6 +82,7 @@ jobs:
             --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
             --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
+            --build-arg DISABLE_TYPES='${{ github.event.inputs.disable_types }}' \
             --target wheel \
             --output type=local,dest=./wheels \
             .
@@ -107,6 +111,7 @@ jobs:
             --build-arg GCC_VERSION='${{ github.event.inputs.gcc_version }}' \
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
             --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
+            --build-arg DISABLE_TYPES='${{ github.event.inputs.disable_types }}' \
             --target smoketest \
             --output type=cacheonly \
             --progress plain \
