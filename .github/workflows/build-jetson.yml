@@ -31,6 +31,12 @@ on:
       disable_types:
         description: "build.sh --disable_types value. Set to \"float8\" on JP5: the FP8 enums need CUDA>=11.8"
         default: ""
+      cuda_upgrade:
+        description: "apt suffix of a CUDA toolkit to install over the base image, e.g. \"11-8\". JP5 needs it: 11.4's nvcc miscompiles resize_antialias_impl.cu"
+        default: ""
+      cuda_home_dir:
+        description: "CUDA root the build uses. Set to /usr/local/cuda-11.8 alongside cuda_upgrade=11-8"
+        default: "/usr/local/cuda"
 
 jobs:
   build:
@@ -83,6 +89,8 @@ jobs:
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
             --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
             --build-arg DISABLE_TYPES='${{ github.event.inputs.disable_types }}' \
+            --build-arg CUDA_UPGRADE='${{ github.event.inputs.cuda_upgrade }}' \
+            --build-arg CUDA_HOME_DIR='${{ github.event.inputs.cuda_home_dir }}' \
             --target wheel \
             --output type=local,dest=./wheels \
             .
@@ -112,6 +120,8 @@ jobs:
             --build-arg PYTHON_SOURCE='${{ github.event.inputs.python_source }}' \
             --build-arg CMAKE_SPEC='${{ github.event.inputs.cmake_spec }}' \
             --build-arg DISABLE_TYPES='${{ github.event.inputs.disable_types }}' \
+            --build-arg CUDA_UPGRADE='${{ github.event.inputs.cuda_upgrade }}' \
+            --build-arg CUDA_HOME_DIR='${{ github.event.inputs.cuda_home_dir }}' \
             --target smoketest \
             --output type=cacheonly \
             --progress plain \

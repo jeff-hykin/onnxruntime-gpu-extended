@@ -47,6 +47,19 @@ ARG CMAKE_SPEC=cmake>=3.28
 # build.sh only version-checks this when --cuda_version is passed, which it is
 # not, so getting it wrong fails ~35 min into the compile rather than at configure.
 ARG DISABLE_TYPES=
+# apt suffix of a CUDA toolkit to install over the base image's own, e.g. "11-8".
+# Needed on JP5: the CUDA 11.4 that L4T r35 ships miscompiles
+# resize_antialias_impl.cu — cicc emits IR that fails its own verifier with
+# "Call parameter type does not match function signature" on the std::tuple
+# arguments of the DISPATCH_ANTIALIAS_FILTER_SETUP macro. It is an nvcc bug, not
+# a host-compiler one (microsoft/onnxruntime#20330 collects reports on 11.4, 11.6
+# and gcc 9/10/12); 11.8 is the earliest nvcc that gets it right. NVIDIA ships an
+# 11.8 toolkit for Tegra in the ubuntu2004/arm64 repo, which is how a JetPack 5
+# device ends up with /usr/local/cuda-11.8. Empty keeps the base image's CUDA.
+ARG CUDA_UPGRADE=
+# Where the build should look for CUDA. Point at the upgraded toolkit when one is
+# installed; the base image's own symlink otherwise.
+ARG CUDA_HOME_DIR=/usr/local/cuda
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -74,6 +87,23 @@ RUN set -eux; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     rm -rf /usr/include/python*/numpy
+
+# Upgraded CUDA toolkit, installed alongside the base image's own under
+# /usr/local/cuda-<version>. cuDNN deliberately stays at whatever L4T shipped, so
+# the wheel keeps linking libcudnn.so.8 — a cuDNN 8 build serves every CUDA 11.x.
+RUN set -eux; \
+    if [ -n "${CUDA_UPGRADE}" ] && [ "${CUDA_UPGRADE}" != none ]; then \
+        wget -qO /tmp/cuda-keyring.deb \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/arm64/cuda-keyring_1.1-1_all.deb; \
+        dpkg -i /tmp/cuda-keyring.deb; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends cuda-toolkit-${CUDA_UPGRADE}; \
+        rm -f /tmp/cuda-keyring.deb; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# Fail here rather than 45 minutes into nvcc if CUDA_HOME_DIR is wrong.
+RUN ${CUDA_HOME_DIR:-/usr/local/cuda}/bin/nvcc --version
 
 # Isolated venv for the target python; recent cmake/build deps via pip (Ubuntu
 # 22.04 apt cmake is too old for onnxruntime 1.26).
@@ -143,7 +173,7 @@ RUN NUMPY_INCLUDE=$(python -c "import numpy; print(numpy.get_include())") && \
         --compile_no_warning_as_error \
         ${DISABLE_TYPES:+--disable_types ${DISABLE_TYPES}} \
         --use_cuda \
-        --cuda_home /usr/local/cuda \
+        --cuda_home ${CUDA_HOME_DIR:-/usr/local/cuda} \
         --cudnn_home /usr \
         --build_wheel \
         --skip_tests \
@@ -163,7 +193,7 @@ RUN ./build.sh \
         --compile_no_warning_as_error \
         ${DISABLE_TYPES:+--disable_types ${DISABLE_TYPES}} \
         --use_cuda \
-        --cuda_home /usr/local/cuda \
+        --cuda_home ${CUDA_HOME_DIR:-/usr/local/cuda} \
         --cudnn_home /usr \
         --build_wheel \
         --skip_tests \
